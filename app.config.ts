@@ -27,11 +27,15 @@ const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
 const schemeFromBundleId = `manus${timestamp}`;
 
 const env = {
-  // App branding - update these values directly (do not use env vars)
-  appName: "Offline Productivity App",
-  appSlug: "OfflineProductivityApp",
-  // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
-  // Leave empty to use the default icon from assets/images/icon.png
+  // App branding - TaskMe by SEED-ITES
+  appName: "TaskMe",
+  appSlug: "taskme",
+  appDescription: "Your personal task and note manager - Stay organized, stay productive",
+  poweredBy: "SEED-ITES",
+  companyUrl: "https://seedit.site",
+  developerName: "Ashok Selva Kumar E",
+  companyFullName: "SEED Innovating Technologies and Edu Services",
+  companyTagline: "Product Development, Leading Training and Placement Company managed by IT veterans",
   logoUrl: "",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
@@ -64,7 +68,16 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS"],
+    permissions: [
+      "POST_NOTIFICATIONS",
+      "RECEIVE_BOOT_COMPLETED",
+      "FOREGROUND_SERVICE",
+      "WAKE_LOCK",
+      "RECORD_AUDIO",
+      "RECEIVE_BOOT_COMPLETED",
+      "FOREGROUND_SERVICE_DATA_SYNC",
+      "SCHEDULE_EXACT_ALARM"
+    ],
     intentFilters: [
       {
         action: "VIEW",
@@ -85,6 +98,15 @@ const config: ExpoConfig = {
     favicon: "./assets/images/favicon.png",
   },
   plugins: [
+    [
+      "expo-asset",
+      {
+        "assets": [
+          "./assets/sounds/notification1.mp3",
+          "./assets/sounds/notification2.mp3"
+        ]
+      }
+    ],
     "expo-router",
     [
       "expo-audio",
@@ -129,7 +151,8 @@ const config: ExpoConfig = {
     eas: {
       projectId: "721ad33c-90bf-4674-9f0a-c158cb8763f3"
     }
-  }
+  }, 
+  owner: "ashokmarquezs-organization"
 };
 
 export default config;

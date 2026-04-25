@@ -1,10 +1,11 @@
-import { ScrollView, Text, View, TouchableOpacity, FlatList } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, FlatList, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { ScreenContainer } from "@/components/screen-container";
 import { TaskCard } from "@/components/task-card";
 import { useApp } from "@/lib/app-context";
 import { Task, TaskStatus, TaskPriority } from "@/lib/types";
 import { useState } from "react";
+import * as Notifications from "expo-notifications";
 
 export default function TasksScreen() {
   const router = useRouter();
@@ -48,12 +49,51 @@ export default function TasksScreen() {
   };
 
   const handleUpdateReminder = async (task: Task, newTime: number) => {
-    await updateTask({
-      ...task,
-      dueDate: newTime,
-      dueTime: newTime,
-      updatedAt: Date.now(),
-    });
+    try {
+      // Update task with reminder time
+      await updateTask({
+        ...task,
+        dueDate: newTime,
+        dueTime: newTime,
+        updatedAt: Date.now(),
+      });
+      
+      // Schedule notification for the reminder
+      const settings = await Notifications.getPermissionsAsync();
+      if (!settings.granted) {
+        const request = await Notifications.requestPermissionsAsync();
+        if (!request.granted) {
+          Alert.alert("Permission Required", "Please enable notifications to receive reminders.");
+          return;
+        }
+      }
+      
+      // Schedule the reminder notification
+      const secondsFromNow = Math.floor((newTime - Date.now()) / 1000);
+      if (secondsFromNow > 0) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: "⏰ Task Reminder",
+            body: `"${task.title}" is due now!`,
+            data: {
+              type: "task-reminder",
+              taskId: task.id,
+              taskTitle: task.title,
+            },
+            categoryIdentifier: "task-reminder-actions",
+          },
+          trigger: {
+            type: "timeInterval",
+            seconds: secondsFromNow,
+          } as Notifications.TimeIntervalTriggerInput,
+        });
+        
+        Alert.alert("Reminder Set", `You will be reminded in ${Math.floor(secondsFromNow / 60)} minutes.`);
+      }
+    } catch (error) {
+      console.error("Error scheduling reminder:", error);
+      Alert.alert("Error", "Failed to schedule reminder.");
+    }
   };
 
   const handleAddTask = () => {

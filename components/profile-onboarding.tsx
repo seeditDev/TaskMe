@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useApp } from "@/lib/app-context";
 import { ScreenContainer } from "./screen-container";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,7 +8,8 @@ import { Ionicons } from "@expo/vector-icons";
 export function ProfileOnboarding() {
   const { state, updateSettings } = useApp();
   const [name, setName] = useState("");
-  const [dob, setDob] = useState("");
+  const [dob, setDob] = useState<Date | null>(null);
+  const [showDobPicker, setShowDobPicker] = useState(false);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
 
@@ -26,7 +28,7 @@ export function ProfileOnboarding() {
 
     const userProfile = {
       name,
-      dob,
+      dob: dob.toISOString().split('T')[0], // Format as YYYY-MM-DD
       phoneNumber: phone,
       email,
       isCompleted: true,
@@ -72,16 +74,36 @@ export function ProfileOnboarding() {
 
             <View>
               <Text className="text-sm font-medium text-foreground mb-1 ml-1">Date of Birth</Text>
-              <View className="bg-surface border border-border rounded-xl px-4 py-3 flex-row items-center">
-                <Ionicons name="calendar-outline" size={20} color="#888" className="mr-2" />
-                <TextInput
-                  className="flex-1 text-foreground ml-2"
-                  placeholder="DD/MM/YYYY"
-                  placeholderTextColor="#888"
-                  value={dob}
-                  onChangeText={setDob}
-                />
-              </View>
+              <TouchableOpacity 
+                onPress={() => setShowDobPicker(true)}
+                className="bg-surface border border-border rounded-xl px-4 py-3 flex-row items-center"
+              >
+                <Ionicons name="calendar-outline" size={20} color="#888" style={{ marginRight: 8 }} />
+                <Text className="flex-1 text-foreground ml-2">
+                  {dob ? dob.toDateString() : "Select date"}
+                </Text>
+              </TouchableOpacity>
+              {showDobPicker && (
+                <View style={Platform.OS === 'android' ? { position: 'absolute', top: 50, left: 0, right: 0, zIndex: 1000 } : {}}>
+                  <DateTimePicker
+                    value={dob || new Date()}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
+                      if (Platform.OS === 'android') {
+                        setShowDobPicker(false);
+                      }
+                      if (selectedDate) {
+                        setDob(selectedDate);
+                      }
+                      if (Platform.OS === 'ios') {
+                        setShowDobPicker(false);
+                      }
+                    }}
+                    maximumDate={new Date()}
+                  />
+                </View>
+              )}
             </View>
 
             <View>

@@ -1,0 +1,154 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.2
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Make gradlew executable
+      run: chmod +x android/gradlew
+      
+    - name: Build Android Release APK
+      run: |
+        cd android
+        ./gradlew assembleRelease
+      env:
+        REACT_NATIVE_RELEASE_LEVEL: 'stable'
+        
+    - name: Get version from tag
+      if: startsWith(github.ref, 'refs/tags/v')
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+    - name: Create version info file
+      run: |
+        echo "{\"version\": \"${{ steps.get_version.outputs.VERSION }}\", \"build\": ${{ github.run_number }}, \"date\": \"$(date -u +%Y-%m-%d)\"}" > version.json
+        
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-release-apk
+        path: android/app/build/outputs/apk/release/app-release.apk
+        
+    - name: Upload version info
+      uses: actions/upload-artifact@v4
+      with:
+        name: version-info
+        path: version.json
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Get full history for changelog
+        
+    - name: Download APK artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: app-release-apk
+        path: ./apk
+        
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+    - name: Generate changelog
+      id: changelog
+      run: |
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ github.ref }}^ 2>/dev/null || echo "")
+        if [ -z "$PREVIOUS_TAG" ]; then
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "### What's New in v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "- 🎉 Initial release" >> $GITHUB_OUTPUT
+          echo "- 📱 Android APK distribution" >> $GITHUB_OUTPUT
+          echo "- 🔄 Auto-update support" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "### What's New in v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          git log --pretty=format:"- %s" $PREVIOUS_TAG..${{ github.ref }} >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Full Changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ github.ref }}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: "Version ${{ steps.get_version.outputs.VERSION }}"
+        body: ${{ steps.changelog.outputs.CHANGELOG }}
+        files: |
+          ./apk/app-release.apk
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Update version file in repository
+      run: |
+        echo "{\"version\": \"${{ steps.get_version.outputs.VERSION }}\", \"versionCode\": $(echo ${{ steps.get_version.outputs.VERSION }} | tr '.' '\n' | tail -1), \"downloadUrl\": \"https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/app-release.apk\"}" > version.json
+        
+    - name: Commit version file
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "Update version.json for v${{ steps.get_version.outputs.VERSION }}"
+        file_pattern: version.json
+        branch: main
+
+  notify:
+    name: Send Notifications
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+    - name: Print release info
+      run: |
+        echo "🎉 TaskMe v${{ steps.get_version.outputs.VERSION }} released!"
+        echo "📱 Download: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.VERSION }}"
+        echo "🌐 Website: https://seedit.site/taskme"

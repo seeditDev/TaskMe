@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Switch,
   Platform,
+  StyleSheet,
 } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { useApp } from "@/lib/app-context";
@@ -20,10 +21,11 @@ import {
   ReminderAssociatedType,
 } from "@/lib/types";
 import { useState, useEffect, useCallback } from "react";
-import { formatDate, formatTime } from "@/lib/date-utils";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { formatDate, formatTime } from "@/lib/date-utils";
 import { reminderManager } from "@/lib/reminder-manager";
 import { reminderStorage } from "@/lib/storage";
+import { taskDueMonitor } from "@/lib/task-due-monitor";
 import { Ionicons } from "@expo/vector-icons";
 import { useColors } from "@/hooks/use-colors";
 import { speechRecognitionService } from "@/lib/voice-service";
@@ -67,8 +69,8 @@ export default function TaskDetailScreen() {
   // UI state
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [showReminderDatePicker, setShowReminderDatePicker] = useState(false);
-  const [showReminderTimePicker, setShowReminderTimePicker] = useState(false);
+  // Reminder preset options (in minutes)
+  const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isListeningTitle, setIsListeningTitle] = useState(false);
   const [isListeningDesc, setIsListeningDesc] = useState(false);
@@ -151,6 +153,9 @@ export default function TaskDetailScreen() {
       } else {
         await updateTask(task);
       }
+
+      // Schedule due date notification if task has due date
+      await taskDueMonitor.updateDueNotification(task);
 
       router.back();
     } catch (error) {
@@ -245,26 +250,11 @@ export default function TaskDetailScreen() {
     }
   };
 
-  const handleReminderDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
-    setShowReminderDatePicker(false);
-    if (selectedDate && reminderTime) {
-      const newDate = new Date(selectedDate);
-      newDate.setHours(reminderTime.getHours(), reminderTime.getMinutes());
-      setReminderTime(newDate);
-    } else if (selectedDate) {
-      setReminderTime(selectedDate);
-    }
-  };
-
-  const handleReminderTimeChange = (event: DateTimePickerEvent, selectedTime?: Date) => {
-    setShowReminderTimePicker(false);
-    if (selectedTime && reminderTime) {
-      const newTime = new Date(reminderTime);
-      newTime.setHours(selectedTime.getHours(), selectedTime.getMinutes());
-      setReminderTime(newTime);
-    } else if (selectedTime) {
-      setReminderTime(selectedTime);
-    }
+  // Handle reminder preset selection
+  const handleReminderPreset = (minutes: number) => {
+    const reminderTime = new Date(Date.now() + minutes * 60 * 1000);
+    setReminderMinutes(minutes);
+    setReminderTime(reminderTime);
   };
 
   // Voice input handlers
@@ -491,13 +481,15 @@ export default function TaskDetailScreen() {
             <Ionicons name="calendar-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
           {showDatePicker && (
-            <DateTimePicker
-              value={dueDate || new Date()}
-              mode="date"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={handleDateChange}
-              minimumDate={new Date()}
-            />
+            <View style={Platform.OS === 'android' ? { position: 'absolute', top: 50, left: 0, right: 0, zIndex: 1000 } : {}}>
+              <DateTimePicker
+                value={dueDate || new Date()}
+                mode="date"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={handleDateChange}
+                minimumDate={new Date()}
+              />
+            </View>
           )}
         </View>
 
@@ -514,12 +506,14 @@ export default function TaskDetailScreen() {
             <Ionicons name="time-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
           {showTimePicker && (
-            <DateTimePicker
-              value={dueTime || new Date()}
-              mode="time"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={handleTimeChange}
-            />
+            <View style={Platform.OS === 'android' ? { position: 'absolute', top: 50, left: 0, right: 0, zIndex: 1000 } : {}}>
+              <DateTimePicker
+                value={dueTime || new Date()}
+                mode="time"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={handleTimeChange}
+              />
+            </View>
           )}
         </View>
 
@@ -540,43 +534,36 @@ export default function TaskDetailScreen() {
 
           {hasReminder && (
             <View className="px-4 pb-4">
-              {/* Reminder Time */}
+              {/* Reminder Preset Options */}
               <View className="mb-3">
-                <Text className="text-sm text-muted mb-2">Reminder Time</Text>
-                <TouchableOpacity
-                  onPress={() => setShowReminderDatePicker(true)}
-                  className="bg-background rounded-lg p-3 border border-border mb-2 flex-row items-center justify-between"
-                >
-                  <Text className={reminderTime ? "text-foreground" : "text-muted"}>
-                    {reminderTime ? formatDate(reminderTime.getTime()) : "Select date..."}
+                <Text className="text-sm text-muted mb-2">Remind me in</Text>
+                <View className="flex-row gap-2">
+                  {[5, 10, 15].map((minutes) => (
+                    <TouchableOpacity
+                      key={minutes}
+                      onPress={() => handleReminderPreset(minutes)}
+                      className={`flex-1 py-3 px-2 rounded-lg flex-row items-center justify-center ${
+                        reminderMinutes === minutes
+                          ? "bg-primary"
+                          : "bg-surface border border-border"
+                      }`}
+                    >
+                      <Text
+                        className={
+                          reminderMinutes === minutes
+                            ? "text-white font-medium"
+                            : "text-foreground"
+                        }
+                      >
+                        {minutes} min
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {reminderTime && (
+                  <Text className="text-xs text-muted mt-2 text-center">
+                    Will remind at {formatTime(reminderTime.getTime())}
                   </Text>
-                  <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setShowReminderTimePicker(true)}
-                  className="bg-background rounded-lg p-3 border border-border flex-row items-center justify-between"
-                >
-                  <Text className={reminderTime ? "text-foreground" : "text-muted"}>
-                    {reminderTime ? formatTime(reminderTime.getTime()) : "Select time..."}
-                  </Text>
-                  <Ionicons name="time-outline" size={18} color={colors.primary} />
-                </TouchableOpacity>
-                {showReminderDatePicker && (
-                  <DateTimePicker
-                    value={reminderTime || new Date()}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    onChange={handleReminderDateChange}
-                    minimumDate={new Date()}
-                  />
-                )}
-                {showReminderTimePicker && (
-                  <DateTimePicker
-                    value={reminderTime || new Date()}
-                    mode="time"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    onChange={handleReminderTimeChange}
-                  />
                 )}
               </View>
 

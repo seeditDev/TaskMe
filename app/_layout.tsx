@@ -21,6 +21,7 @@ import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-run
 import { AppProvider, useApp } from "@/lib/app-context";
 import { ProfileOnboarding } from "@/components/profile-onboarding";
 import { notificationSound } from "@/lib/notification-sound";
+import { taskDueMonitor } from "@/lib/task-due-monitor";
 
 const DEFAULT_WEB_INSETS: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const DEFAULT_WEB_FRAME: Rect = { x: 0, y: 0, width: 0, height: 0 };
@@ -40,6 +41,14 @@ export default function RootLayout() {
   useEffect(() => {
     initManusRuntime();
     notificationSound.init();
+    
+    // Initialize task due monitor for automatic due notifications
+    taskDueMonitor.initialize().then(() => {
+      // Check for overdue tasks on app start
+      taskDueMonitor.checkOverdueTasks();
+      // Schedule all due notifications
+      taskDueMonitor.scheduleAllDueNotifications();
+    });
   }, []);
 
   const handleSafeAreaUpdate = useCallback((metrics: Metrics) => {

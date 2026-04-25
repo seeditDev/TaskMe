@@ -142,5 +142,8 @@ export interface DashboardData {
   todaysTasks: Task[];
   upcomingTasks: Task[];
   completedTodayCount: number;
+  completedTodayTasks: Task[];
+  inProgressTasks: Task[];
+  pendingTasks: Task[];
   recentNotes: Note[];
 }

@@ -123,6 +123,36 @@ export const taskStorage = {
       return 0;
     }
   },
+
+  async getCompletedTodayTasks(): Promise<Task[]> {
+    try {
+      const tasks = await this.getAllTasks();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      return tasks
+        .filter((t) => {
+          if (t.status !== TaskStatus.COMPLETED) return false;
+          const updatedDate = new Date(t.updatedAt);
+          updatedDate.setHours(0, 0, 0, 0);
+          return updatedDate.getTime() === today.getTime();
+        })
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    } catch (error) {
+      console.error("Error reading completed today tasks:", error);
+      return [];
+    }
+  },
+
+  async getTasksByStatus(status: TaskStatus): Promise<Task[]> {
+    try {
+      const tasks = await this.getAllTasks();
+      return tasks.filter((t) => t.status === status);
+    } catch (error) {
+      console.error("Error reading tasks by status:", error);
+      return [];
+    }
+  },
 };
 
 // Note Storage

@@ -122,6 +122,7 @@ export const voiceService = {
 
 // Speech recognition service using Web Speech API for React Native
 // For production, consider using @react-native-voice/voice or expo-speech-recognition
+import { Platform } from "react-native";
 
 type SpeechRecognitionCallback = (text: string, isFinal: boolean) => void;
 type ErrorCallback = (error: string) => void;
@@ -135,6 +136,11 @@ class SpeechRecognitionService {
   async requestPermissions(): Promise<boolean> {
     // On web, permissions are handled by the browser
     // On mobile, we'd need expo-permissions or similar
+    if (Platform.OS !== 'web') {
+      // For Android/iOS, we'd need to request microphone permissions
+      // This requires expo-permissions or react-native-permissions
+      console.log("Mobile platform detected - speech recognition requires native module");
+    }
     return true;
   }
 
@@ -147,8 +153,8 @@ class SpeechRecognitionService {
       this.onResultCallback = onResult;
       this.onErrorCallback = onError || null;
 
-      // Check if running on web or native
-      if (typeof window !== "undefined" && "webkitSpeechRecognition" in window) {
+      // Check if running on web
+      if (Platform.OS === 'web' && typeof window !== "undefined" && "webkitSpeechRecognition" in window) {
         // Use Web Speech API
         const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
         this.recognition = new SpeechRecognition();
@@ -197,12 +203,18 @@ class SpeechRecognitionService {
 
         this.recognition.start();
         this.isListening = true;
-      } else {
-        // Fallback for React Native - simulate with expo-speech (TTS only)
-        // In production, integrate with @react-native-voice/voice
-        console.warn("Speech recognition not available. Using text input fallback.");
+      } else if (Platform.OS !== 'web') {
+        // Android/iOS - use expo-speech for now (TTS only, no STT)
+        // For full speech recognition on mobile, install @react-native-voice/voice
+        console.warn("Speech recognition (STT) not available on mobile. Use keyboard input.");
         if (this.onErrorCallback) {
-          this.onErrorCallback("Speech recognition not available on this platform");
+          this.onErrorCallback("Voice input not available. Please type instead.");
+        }
+      } else {
+        // Web but no speech API support
+        console.warn("Speech recognition not available in this browser");
+        if (this.onErrorCallback) {
+          this.onErrorCallback("Speech recognition not supported");
         }
       }
     } catch (error) {

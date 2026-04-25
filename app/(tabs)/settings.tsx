@@ -1,19 +1,46 @@
-import { ScrollView, Text, View, TouchableOpacity, Switch, Alert, TextInput, Modal, Platform } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Switch,
+  TextInput,
+  Modal,
+  ScrollView,
+  Alert,
+  Linking,
+  ActivityIndicator,
+  Platform,
+} from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { useApp } from "@/lib/app-context";
 import { useColors } from "@/hooks/use-colors";
-import { AppSettings, ReminderType } from "@/lib/types";
+import { useAppUpdate } from "@/hooks/use-app-update";
+import { AppSettings, ReminderType, TaskStatus } from "@/lib/types";
+import { taskStorage, noteStorage } from "@/lib/storage";
 import { useState, useEffect } from "react";
 import { backupService } from "@/lib/backup-service";
 import { notificationSound, NotificationSoundType } from "@/lib/notification-sound";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { voiceService } from "@/lib/voice-service";
+import { historyService, ActivityItem } from "@/lib/history-service";
+import * as Sharing from "expo-sharing";
+import { shareApp as shareViaUpdateManager } from "@/lib/update-manager";
 
-export default function SettingsScreen() {
+type MoreView = 'menu' | 'history' | 'settings' | 'help' | 'about' | 'privacy' | 'terms';
+
+export default function MoreScreen() {
   const { state, updateSettings } = useApp();
   const colors = useColors();
   const { settings } = state;
+  
+  // App update hook (Android only)
+  const { 
+    currentVersion, 
+    isChecking: isCheckingUpdate, 
+    checkForUpdate 
+  } = useAppUpdate();
+  const [currentView, setCurrentView] = useState<MoreView>('menu');
   const [localSettings, setLocalSettings] = useState<AppSettings | null>(settings);
   const [stats, setStats] = useState({
     tasks: 0,
@@ -35,6 +62,9 @@ export default function SettingsScreen() {
   const [editPhone, setEditPhone] = useState("");
   const [editDob, setEditDob] = useState<Date>(new Date());
   const [showDobPicker, setShowDobPicker] = useState(false);
+  
+  // History state
+  const [activityHistory, setActivityHistory] = useState<ActivityItem[]>([]);
 
   useEffect(() => {
     if (settings) {
@@ -54,15 +84,60 @@ export default function SettingsScreen() {
     setStats(dataStats);
   };
 
+  const loadHistory = async () => {
+    const history = await historyService.getHistory();
+    setActivityHistory(history);
+  };
+
+  const handleShareApp = async () => {
+    try {
+      // Try native update manager first (Android only, includes GitHub URL)
+      if (Platform.OS === 'android') {
+        const shared = await shareViaUpdateManager();
+        if (shared) {
+          await historyService.logActivity(
+            'share_app',
+            'Shared App',
+            'User shared TaskMe app via native share'
+          );
+          return;
+        }
+      }
+      
+      // Fallback to expo-sharing
+      await Sharing.shareAsync('https://seedit.site/taskme', {
+        dialogTitle: 'Share TaskMe with friends',
+      });
+      
+      await historyService.logActivity(
+        'share_app',
+        'Shared App',
+        'User shared TaskMe app'
+      );
+    } catch (error) {
+      console.log('Share cancelled or error:', error);
+    }
+  };
+
   const handleToggleSetting = async (key: keyof AppSettings, value: any) => {
     if (!localSettings) return;
     const updated = { ...localSettings, [key]: value };
     setLocalSettings(updated);
     await updateSettings(updated);
 
+    // Log settings changes
     if (key === "soundEnabled") {
+      await historyService.logSettingsChanged("Sound", !value ? "on" : "off", value ? "on" : "off");
       const message = value ? "Sound enabled" : "Sound disabled";
       voiceService.speak(message);
+    }
+    
+    if (key === "notificationsEnabled") {
+      await historyService.logSettingsChanged("Notifications", !value ? "on" : "off", value ? "on" : "off");
+    }
+    
+    if (key === "notificationSound") {
+      await historyService.logNotificationSoundChanged(value as string);
     }
     
     // Play test sound when enabling notifications
@@ -95,6 +170,7 @@ export default function SettingsScreen() {
 
     setLocalSettings(updatedSettings);
     await updateSettings(updatedSettings);
+    await historyService.logProfileUpdated(`Name: ${editName}, Email: ${editEmail}`);
     setIsEditingProfile(false);
     Alert.alert("Success", "Profile updated successfully");
   };
@@ -110,6 +186,7 @@ export default function SettingsScreen() {
     try {
       setIsLoading(true);
       const json = await backupService.exportToJSON();
+      await historyService.logDataExported();
       Alert.alert(
         "Export Successful",
         `Data exported successfully!\n\nSize: ${stats.totalSize}\nItems: ${stats.tasks + stats.notes} total`,
@@ -132,6 +209,7 @@ export default function SettingsScreen() {
       setIsLoading(true);
       const success = await backupService.importFromJSON(importData.trim());
       if (success) {
+        await historyService.logDataImported();
         Alert.alert(
           "Import Successful",
           "Data imported successfully! Please restart the app to see changes.",
@@ -171,20 +249,455 @@ export default function SettingsScreen() {
   if (!localSettings) {
     return (
       <ScreenContainer className="items-center justify-center">
-        <Text className="text-foreground text-lg">Loading settings...</Text>
+        <Text className="text-foreground text-lg">Loading...</Text>
       </ScreenContainer>
     );
   }
 
   const profile = localSettings.userProfile;
 
+  // Menu View
+  const renderMenu = () => (
+    <View className="space-y-3">
+      <Text className="text-2xl font-bold text-foreground mb-4">More</Text>
+      
+      {/* History Option */}
+      <TouchableOpacity 
+        onPress={() => { setCurrentView('history'); loadHistory(); }}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mr-3">
+          <Ionicons name="time-outline" size={20} color={colors.primary} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">History</Text>
+          <Text className="text-xs text-muted">View all your activities</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Settings Option */}
+      <TouchableOpacity 
+        onPress={() => setCurrentView('settings')}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mr-3">
+          <Ionicons name="settings-outline" size={20} color={colors.primary} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">Settings</Text>
+          <Text className="text-xs text-muted">App preferences & defaults</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Help Option */}
+      <TouchableOpacity 
+        onPress={() => setCurrentView('help')}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mr-3">
+          <Ionicons name="help-circle-outline" size={20} color={colors.primary} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">Help & FAQ</Text>
+          <Text className="text-xs text-muted">Get help using TaskMe</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* About Option */}
+      <TouchableOpacity 
+        onPress={() => setCurrentView('about')}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mr-3">
+          <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">About</Text>
+          <Text className="text-xs text-muted">App info & developer</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Check for Updates Option */}
+      <TouchableOpacity 
+        onPress={() => { checkForUpdate(); }}
+        disabled={isCheckingUpdate}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-success/10 items-center justify-center mr-3">
+          <Ionicons name="refresh-circle-outline" size={20} color={colors.success} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">
+            {isCheckingUpdate ? 'Checking...' : 'Check for Updates'}
+          </Text>
+          <Text className="text-xs text-muted">
+            {currentVersion ? `Current: v${currentVersion.versionName}` : 'Get latest version'}
+          </Text>
+        </View>
+        {isCheckingUpdate ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+        )}
+      </TouchableOpacity>
+
+      {/* Privacy Policy Option */}
+      <TouchableOpacity 
+        onPress={() => setCurrentView('privacy')}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-warning/10 items-center justify-center mr-3">
+          <Ionicons name="shield-checkmark-outline" size={20} color={colors.warning} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">Privacy Policy</Text>
+          <Text className="text-xs text-muted">How we handle your data</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Terms of Service Option */}
+      <TouchableOpacity 
+        onPress={() => setCurrentView('terms')}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mr-3">
+          <Ionicons name="document-text-outline" size={20} color={colors.primary} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">Terms of Service</Text>
+          <Text className="text-xs text-muted">Usage terms and conditions</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Rate App */}
+      <TouchableOpacity 
+        onPress={() => Linking.openURL('market://details?id=com.seedites.taskme')}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-success/10 items-center justify-center mr-3">
+          <Ionicons name="star-outline" size={20} color={colors.success} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">Rate App</Text>
+          <Text className="text-xs text-muted">Rate us on Play Store</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Share App */}
+      <TouchableOpacity 
+        onPress={handleShareApp}
+        className="bg-surface rounded-lg p-4 border border-border flex-row items-center"
+      >
+        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mr-3">
+          <Ionicons name="share-outline" size={20} color={colors.primary} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-foreground font-semibold">Share App</Text>
+          <Text className="text-xs text-muted">Share with friends</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      </TouchableOpacity>
+
+      {/* Quick Stats */}
+      <View className="bg-surface rounded-lg p-4 border border-border mt-4">
+        <Text className="text-sm font-semibold text-foreground mb-3">Quick Stats</Text>
+        <View className="flex-row justify-between">
+          <View className="items-center">
+            <Text className="text-xl font-bold text-primary">{stats.tasks}</Text>
+            <Text className="text-xs text-muted">Tasks</Text>
+          </View>
+          <View className="items-center">
+            <Text className="text-xl font-bold text-primary">{stats.notes}</Text>
+            <Text className="text-xs text-muted">Notes</Text>
+          </View>
+          <View className="items-center">
+            <Text className="text-xl font-bold text-primary">{stats.reminders}</Text>
+            <Text className="text-xs text-muted">Reminders</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+
+  // History View
+  const renderHistory = () => (
+    <View className="flex-1">
+      <View className="flex-row items-center mb-4">
+        <TouchableOpacity onPress={() => setCurrentView('menu')} className="mr-3">
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text className="text-2xl font-bold text-foreground">History</Text>
+      </View>
+      
+      <ScrollView className="flex-1">
+        {activityHistory.length === 0 ? (
+          <Text className="text-muted text-center py-8">No activity yet</Text>
+        ) : (
+          activityHistory.map((item) => (
+            <View key={item.id} className="bg-surface rounded-lg p-3 border border-border mb-2">
+              <View className="flex-row items-center mb-1">
+                <View className={`w-2 h-2 rounded-full mr-2 ${
+                  item.type.includes('task') ? 'bg-primary' : 
+                  item.type.includes('note') ? 'bg-warning' : 
+                  item.type.includes('notification') ? 'bg-primary' :
+                  item.type.includes('profile') ? 'bg-success' :
+                  item.type.includes('settings') ? 'bg-warning' : 'bg-muted'
+                }`} />
+                <Text className="text-foreground font-medium">{item.title}</Text>
+              </View>
+              <Text className="text-sm text-muted ml-4">{item.description}</Text>
+              <Text className="text-xs text-muted mt-1 ml-4">{new Date(item.timestamp).toLocaleString()}</Text>
+            </View>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+
+  // Help View
+  const renderHelp = () => (
+    <View className="flex-1">
+      <View className="flex-row items-center mb-4">
+        <TouchableOpacity onPress={() => setCurrentView('menu')} className="mr-3">
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text className="text-2xl font-bold text-foreground">Help & FAQ</Text>
+      </View>
+      
+      <ScrollView className="flex-1">
+        <View className="space-y-4">
+          <View className="bg-surface rounded-lg p-4 border border-border">
+            <Text className="text-foreground font-semibold mb-2">How do I create a task?</Text>
+            <Text className="text-sm text-muted">Tap the "+ Add Task" button on the home screen, enter a title and optional details, then save.</Text>
+          </View>
+          
+          <View className="bg-surface rounded-lg p-4 border border-border">
+            <Text className="text-foreground font-semibold mb-2">How do reminders work?</Text>
+            <Text className="text-sm text-muted">Set a due date and time for your task. TaskMe will remind you when the task is due, and repeat every 30 minutes until completed.</Text>
+          </View>
+          
+          <View className="bg-surface rounded-lg p-4 border border-border">
+            <Text className="text-foreground font-semibold mb-2">What are the notification buttons?</Text>
+            <Text className="text-sm text-muted">"Done" marks the task complete. "Remind in 5 min" reschedules the reminder for 5 minutes later.</Text>
+          </View>
+          
+          <View className="bg-surface rounded-lg p-4 border border-border">
+            <Text className="text-foreground font-semibold mb-2">How do I organize tasks?</Text>
+            <Text className="text-sm text-muted">Tasks have three statuses: In Progress, Yet to Start, and Completed. Use the status buttons to organize your work.</Text>
+          </View>
+          
+          <View className="bg-surface rounded-lg p-4 border border-border">
+            <Text className="text-foreground font-semibold mb-2">Can I backup my data?</Text>
+            <Text className="text-sm text-muted">Yes! Go to Settings → Data Management to export and import your data.</Text>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+
+  // Privacy Policy View
+  const renderPrivacy = () => (
+    <View className="flex-1">
+      <View className="flex-row items-center mb-4">
+        <TouchableOpacity onPress={() => setCurrentView('menu')} className="mr-3">
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text className="text-2xl font-bold text-foreground">Privacy Policy</Text>
+      </View>
+      
+      <ScrollView className="flex-1">
+        <View className="bg-surface rounded-lg p-4 border border-border space-y-4">
+          <View>
+            <Text className="text-foreground font-semibold mb-2">1. Data Collection</Text>
+            <Text className="text-sm text-muted">
+              TaskMe collects and stores only the data you create within the app: tasks, notes, reminders, and profile information. All data is stored locally on your device.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">2. Data Storage</Text>
+            <Text className="text-sm text-muted">
+              All your data is stored locally on your device using secure storage. We do not upload or transmit your data to any external servers unless you explicitly use the backup/export feature.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">3. Notifications</Text>
+            <Text className="text-sm text-muted">
+              The app uses local notifications to remind you of tasks and due dates. These notifications are processed entirely on your device.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">4. Voice Data</Text>
+            <Text className="text-sm text-muted">
+              Voice recognition for task creation uses your device's built-in speech recognition. No voice data is stored or transmitted.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">5. Third-Party Services</Text>
+            <Text className="text-sm text-muted">
+              We do not share your data with third parties. The app operates entirely offline except when you choose to share or backup data.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">6. Your Rights</Text>
+            <Text className="text-sm text-muted">
+              You have full control over your data. You can export, import, or delete all data at any time through the app settings.
+            </Text>
+          </View>
+          
+          <Text className="text-xs text-muted text-center pt-4">
+            Last updated: April 2025
+          </Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+
+  // Terms of Service View
+  const renderTerms = () => (
+    <View className="flex-1">
+      <View className="flex-row items-center mb-4">
+        <TouchableOpacity onPress={() => setCurrentView('menu')} className="mr-3">
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text className="text-2xl font-bold text-foreground">Terms of Service</Text>
+      </View>
+      
+      <ScrollView className="flex-1">
+        <View className="bg-surface rounded-lg p-4 border border-border space-y-4">
+          <View>
+            <Text className="text-foreground font-semibold mb-2">1. Acceptance of Terms</Text>
+            <Text className="text-sm text-muted">
+              By using TaskMe, you agree to these Terms of Service. If you do not agree, please do not use the application.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">2. Use of the App</Text>
+            <Text className="text-sm text-muted">
+              TaskMe is provided for personal productivity purposes. You may not use the app for any illegal or unauthorized purpose.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">3. Data Responsibility</Text>
+            <Text className="text-sm text-muted">
+              You are responsible for maintaining backups of your data. While we strive to provide a stable app, we are not responsible for data loss.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">4. App Updates</Text>
+            <Text className="text-sm text-muted">
+              We may update the app periodically. Continued use after updates constitutes acceptance of any changes.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">5. Limitation of Liability</Text>
+            <Text className="text-sm text-muted">
+              TaskMe is provided "as is" without warranties. SEED-ITES is not liable for any damages arising from the use of this app.
+            </Text>
+          </View>
+          
+          <View>
+            <Text className="text-foreground font-semibold mb-2">6. Contact</Text>
+            <Text className="text-sm text-muted">
+              For questions about these terms, please contact us through the SEED-ITES website at seedit.site.
+            </Text>
+          </View>
+          
+          <Text className="text-xs text-muted text-center pt-4">
+            Last updated: April 2025
+          </Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+
+  // About View
+  const renderAbout = () => (
+    <View className="flex-1">
+      <View className="flex-row items-center mb-4">
+        <TouchableOpacity onPress={() => setCurrentView('menu')} className="mr-3">
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text className="text-2xl font-bold text-foreground">About</Text>
+      </View>
+      
+      <ScrollView className="flex-1">
+        <View className="bg-surface rounded-lg p-4 border border-border">
+          <View className="items-center mb-4">
+            <View className="w-20 h-20 rounded-full bg-primary/20 items-center justify-center mb-2">
+              <Text className="text-4xl">📝</Text>
+            </View>
+            <Text className="text-xl font-bold text-foreground">TaskMe</Text>
+            <Text className="text-sm text-muted">Your personal task and note manager</Text>
+          </View>
+          
+          <View className="pt-4 border-t border-border">
+            <Text className="text-xs text-muted mb-1">Developed by</Text>
+            <Text className="text-sm text-foreground font-medium">Ashok Selva Kumar E</Text>
+          </View>
+          
+          <View className="pt-4 border-t border-border mt-4">
+            <TouchableOpacity onPress={() => Linking.openURL('https://seedit.site')} className="flex-row items-center">
+              <Text className="text-xs text-muted">Powered by </Text>
+              <Text className="text-sm text-primary font-bold">SEED-ITES</Text>
+            </TouchableOpacity>
+            <Text className="text-xs text-muted mt-1">
+              SEED Innovating Technologies and Edu Services
+            </Text>
+            <Text className="text-xs text-muted">
+              Product Development, Leading Training and Placement Company managed by IT veterans
+            </Text>
+            <TouchableOpacity 
+              onPress={() => Linking.openURL('https://seedit.site')}
+              className="mt-2"
+            >
+              <Text className="text-xs text-primary">Visit: seedit.site</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View className="pt-4 border-t border-border mt-4">
+            <Text className="text-xs text-muted text-center">TaskMe v1.0.0</Text>
+            <Text className="text-[10px] text-muted text-center mt-1">Powered by SEED-ITES</Text>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+
   return (
     <ScreenContainer className="p-0">
       <ScrollView contentContainerStyle={{ flexGrow: 1 }} className="p-4">
-        {/* Header */}
-        <Text className="text-2xl font-bold text-foreground mb-6">Settings</Text>
-
-        {/* User Profile Section */}
+        {currentView === 'menu' && renderMenu()}
+        {currentView === 'history' && renderHistory()}
+        {currentView === 'help' && renderHelp()}
+        {currentView === 'about' && renderAbout()}
+        {currentView === 'privacy' && renderPrivacy()}
+        {currentView === 'terms' && renderTerms()}
+        {currentView === 'settings' && (
+        <>
+        {/* Settings Header with Back Button */}
+        <View className="flex-row items-center mb-4">
+          <TouchableOpacity onPress={() => setCurrentView('menu')} className="mr-3">
+            <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+          </TouchableOpacity>
+          <Text className="text-2xl font-bold text-foreground">Settings</Text>
+        </View>
+        
         <View className="mb-6">
           <View className="flex-row justify-between items-center mb-3">
             <Text className="text-lg font-semibold text-foreground">Profile</Text>
@@ -536,11 +1049,46 @@ export default function SettingsScreen() {
           </View>
         </Modal>
 
+        {/* About Section */}
+        <View className="bg-surface rounded-lg p-4 border border-border mb-6">
+          <Text className="text-lg font-semibold text-foreground mb-3">About</Text>
+          <View className="space-y-2">
+            <View>
+              <Text className="text-sm text-foreground font-medium">TaskMe</Text>
+              <Text className="text-xs text-muted">Your personal task and note manager</Text>
+            </View>
+            <View className="pt-2 border-t border-border">
+              <Text className="text-xs text-muted">Developed by</Text>
+              <Text className="text-sm text-foreground font-medium">Ashok Selva Kumar E</Text>
+            </View>
+            <View className="pt-2 border-t border-border">
+              <TouchableOpacity onPress={() => Linking.openURL('https://seedit.site')} className="flex-row items-center">
+                <Text className="text-xs text-muted">Powered by </Text>
+                <Text className="text-sm text-primary font-bold">SEED-ITES</Text>
+              </TouchableOpacity>
+              <Text className="text-xs text-muted mt-1">
+                 SEED Innovating Technologies and Edu Services
+              </Text>
+              <Text className="text-xs text-muted">
+               Product Development, Leading Training and Placement Company managed by IT veterans
+              </Text>
+              <TouchableOpacity 
+                onPress={() => Linking.openURL('https://seedit.site')}
+                className="mt-2"
+              >
+                <Text className="text-xs text-primary">Visit: seedit.site</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
         {/* Footer */}
         <View className="mt-8 mb-12 items-center">
-          <Text className="text-xs text-muted">Taskme App v1.0.0</Text>
-          <Text className="text-[10px] text-muted mt-1">Keep your life organized</Text>
+          <Text className="text-xs text-muted">TaskMe v1.0.0</Text>
+          <Text className="text-[10px] text-muted mt-1">Powered by SEED-ITES</Text>
         </View>
+        </>
+        )}
       </ScrollView>
     </ScreenContainer>
   );

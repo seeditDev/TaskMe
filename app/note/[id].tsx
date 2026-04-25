@@ -616,21 +616,25 @@ export default function NoteDetailScreen() {
                   <Ionicons name="time-outline" size={18} color={colors.primary} />
                 </TouchableOpacity>
                 {showReminderDatePicker && (
-                  <DateTimePicker
-                    value={reminderTime || new Date()}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    onChange={handleReminderDateChange}
-                    minimumDate={new Date()}
-                  />
+                  <View style={Platform.OS === 'android' ? { position: 'absolute', top: 50, left: 0, right: 0, zIndex: 1000 } : {}}>
+                    <DateTimePicker
+                      value={reminderTime || new Date()}
+                      mode="date"
+                      display={Platform.OS === "ios" ? "spinner" : "default"}
+                      onChange={handleReminderDateChange}
+                      minimumDate={new Date()}
+                    />
+                  </View>
                 )}
                 {showReminderTimePicker && (
-                  <DateTimePicker
-                    value={reminderTime || new Date()}
-                    mode="time"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    onChange={handleReminderTimeChange}
-                  />
+                  <View style={Platform.OS === 'android' ? { position: 'absolute', top: 50, left: 0, right: 0, zIndex: 1000 } : {}}>
+                    <DateTimePicker
+                      value={reminderTime || new Date()}
+                      mode="time"
+                      display={Platform.OS === "ios" ? "spinner" : "default"}
+                      onChange={handleReminderTimeChange}
+                    />
+                  </View>
                 )}
               </View>
 

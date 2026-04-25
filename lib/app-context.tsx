@@ -1,10 +1,8 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from "react";
-import { Task, Note, DashboardData, AppSettings } from "./types";
-import {
-  taskStorage,
-  noteStorage,
-  settingsStorage,
-} from "./storage";
+import { Task, Note, DashboardData, AppSettings, TaskStatus } from "./types";
+import { taskStorage, noteStorage, settingsStorage } from "./storage";
+import { taskDueEvents } from "./task-due-monitor";
+import { historyService } from "./history-service";
 
 interface AppState {
   tasks: Task[];
@@ -122,10 +120,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshDashboard = async () => {
     try {
-      const [todaysTasks, upcomingTasks, completedTodayCount, recentNotes] = await Promise.all([
+      const [todaysTasks, upcomingTasks, completedTodayCount, completedTodayTasks, inProgressTasks, pendingTasks, recentNotes] = await Promise.all([
         taskStorage.getTodaysTasks(),
         taskStorage.getUpcomingTasks(),
         taskStorage.getCompletedTodayCount(),
+        taskStorage.getCompletedTodayTasks(),
+        taskStorage.getTasksByStatus(TaskStatus.IN_PROGRESS),
+        taskStorage.getTasksByStatus(TaskStatus.PENDING),
         noteStorage.getRecentNotes(5),
       ]);
 
@@ -135,6 +136,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           todaysTasks,
           upcomingTasks,
           completedTodayCount,
+          completedTodayTasks,
+          inProgressTasks,
+          pendingTasks,
           recentNotes,
         },
       });
@@ -146,6 +150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addTask = async (task: Task) => {
     try {
       await taskStorage.saveTask(task);
+      await historyService.logTaskCreated(task.title, task.id);
       dispatch({ type: "ADD_TASK", payload: task });
       await refreshDashboard();
     } catch (error) {
@@ -159,6 +164,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateTask = async (task: Task) => {
     try {
       await taskStorage.saveTask(task);
+      
+      // Log specific activity based on status change
+      if (task.status === TaskStatus.COMPLETED) {
+        await historyService.logTaskCompleted(task.title, task.id);
+      } else if (task.status === TaskStatus.IN_PROGRESS) {
+        await historyService.logTaskStarted(task.title, task.id);
+      } else if (task.status === TaskStatus.PENDING) {
+        await historyService.logTaskPaused(task.title, task.id);
+      } else {
+        await historyService.logTaskUpdated(task.title, task.id, "Status or details updated");
+      }
+      
       dispatch({ type: "UPDATE_TASK", payload: task });
       await refreshDashboard();
     } catch (error) {
@@ -171,7 +188,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteTask = async (id: string) => {
     try {
+      // Get task name before deleting for history
+      const tasks = await taskStorage.getAllTasks();
+      const task = tasks.find(t => t.id === id);
+      
       await taskStorage.deleteTask(id);
+      if (task) {
+        await historyService.logTaskDeleted(task.title, id);
+      }
       dispatch({ type: "DELETE_TASK", payload: id });
       await refreshDashboard();
     } catch (error) {
@@ -185,6 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addNote = async (note: Note) => {
     try {
       await noteStorage.saveNote(note);
+      await historyService.logNoteCreated(note.title, note.id);
       dispatch({ type: "ADD_NOTE", payload: note });
       await refreshDashboard();
     } catch (error) {
@@ -198,6 +223,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateNote = async (note: Note) => {
     try {
       await noteStorage.saveNote(note);
+      await historyService.logNoteUpdated(note.title, note.id);
       dispatch({ type: "UPDATE_NOTE", payload: note });
       await refreshDashboard();
     } catch (error) {
@@ -210,7 +236,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteNote = async (id: string) => {
     try {
+      // Get note title before deleting for history
+      const notes = await noteStorage.getAllNotes();
+      const note = notes.find(n => n.id === id);
+      
       await noteStorage.deleteNote(id);
+      if (note) {
+        await historyService.logNoteDeleted(note.title, id);
+      }
       dispatch({ type: "DELETE_NOTE", payload: id });
       await refreshDashboard();
     } catch (error) {
@@ -235,6 +268,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadAppData();
+  }, []);
+
+  // Listen for task updates from notification actions
+  useEffect(() => {
+    const handleTaskUpdated = () => {
+      console.log("Task updated from notification, refreshing UI...");
+      loadAppData();
+    };
+    
+    taskDueEvents.on('taskUpdated', handleTaskUpdated);
+    
+    return () => {
+      taskDueEvents.off('taskUpdated', handleTaskUpdated);
+    };
   }, []);
 
   const value: AppContextType = {

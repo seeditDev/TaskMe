@@ -1,4 +1,5 @@
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { Reminder, ReminderType, Task, Note } from "./types";
 import { settingsStorage } from "./storage";
 import { notificationSound } from "./notification-sound";
@@ -11,14 +12,27 @@ Notifications.setNotificationHandler({
   handleNotification: async () => {
     const settings = await settingsStorage.getSettings();
     return {
-      shouldShowAlert: true,
-      shouldPlaySound: settings.soundEnabled,
+      shouldPlaySound: false, // We'll play custom sound manually
       shouldSetBadge: true,
       shouldShowBanner: true,
       shouldShowList: true,
     };
   },
 });
+
+// Set up Android notification channel
+async function setupNotificationChannel(): Promise<string> {
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+    return 'default';
+  }
+  return '';
+}
 
 export const notificationService = {
   async initialize() {
@@ -51,6 +65,8 @@ export const notificationService = {
       }
 
       const settings = await settingsStorage.getSettings();
+      const channelId = await setupNotificationChannel();
+      
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -62,8 +78,12 @@ export const notificationService = {
             associatedType: reminder.associatedType,
             reminderType: reminder.reminderType,
           },
+          ...(Platform.OS === 'android' && { channelId }),
         },
-        trigger: (secondsFromNow > 0 ? { seconds: secondsFromNow } : null) as NotificationTrigger,
+        trigger: {
+          type: 'timeInterval',
+          seconds: secondsFromNow,
+        } as Notifications.TimeIntervalTriggerInput,
       });
 
       return notificationId;

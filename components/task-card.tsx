@@ -4,7 +4,6 @@ import { formatDate, formatTime } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import DateTimePicker from "@react-native-community/datetimepicker";
 
 interface TaskCardProps {
   task: Task;
@@ -24,7 +23,7 @@ export function TaskCard({
   onUpdateReminder 
 }: TaskCardProps) {
   const [showQuickActions, setShowQuickActions] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showReminderOptions, setShowReminderOptions] = useState(false);
 
   const priorityColor = {
     [TaskPriority.LOW]: "bg-green-100 text-green-700",
@@ -37,13 +36,14 @@ export function TaskCard({
 
   const handleCardPress = () => {
     setShowQuickActions(!showQuickActions);
+    setShowReminderOptions(false);
   };
 
-  const handleDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === "ios");
-    if (selectedDate && onUpdateReminder) {
-      onUpdateReminder(selectedDate.getTime());
-    }
+  const handleQuickReminder = (minutes: number) => {
+    const reminderTime = Date.now() + minutes * 60 * 1000;
+    onUpdateReminder?.(reminderTime);
+    setShowReminderOptions(false);
+    setShowQuickActions(false);
   };
 
   return (
@@ -157,7 +157,7 @@ export function TaskCard({
 
           <TouchableOpacity 
             onPress={() => {
-              setShowDatePicker(true);
+              setShowReminderOptions(true);
             }}
             className="flex-row items-center px-2 py-2"
           >
@@ -178,13 +178,30 @@ export function TaskCard({
         </View>
       )}
 
-      {showDatePicker && (
-        <DateTimePicker
-          value={new Date(task.dueDate || Date.now())}
-          mode="datetime"
-          display="default"
-          onChange={handleDateChange}
-        />
+      {/* Quick Reminder Options */}
+      {showReminderOptions && (
+        <View className="bg-surface border-x border-b border-border rounded-b-lg p-3 -mt-1">
+          <Text className="text-sm text-muted mb-2">Remind me in:</Text>
+          <View className="flex-row gap-2">
+            {[5, 10, 15].map((minutes) => (
+              <TouchableOpacity
+                key={minutes}
+                onPress={() => handleQuickReminder(minutes)}
+                className="flex-1 py-2 px-2 rounded-lg bg-primary/10 border border-primary/30"
+              >
+                <Text className="text-center text-primary font-medium text-sm">
+                  {minutes} min
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity
+            onPress={() => setShowReminderOptions(false)}
+            className="mt-2 py-2"
+          >
+            <Text className="text-center text-muted text-sm">Cancel</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );

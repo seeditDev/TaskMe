@@ -1,6 +1,5 @@
 // Notification Sound Service for playing reminder sounds
-import { Audio } from 'expo-av';
-import { Platform } from 'react-native';
+import { createAudioPlayer, AudioSource } from 'expo-audio';
 import { settingsStorage } from './storage';
 
 // Local notification sound assets (bundled with app)
@@ -12,30 +11,18 @@ const SOUND_ASSETS = {
 export type NotificationSoundType = 'default' | 'notification1' | 'notification2' | 'device';
 
 class NotificationSoundService {
-  private sound: Audio.Sound | null = null;
   private isWeb: boolean;
 
   constructor() {
-    this.isWeb = typeof window !== 'undefined' && !navigator.userAgent.includes('ReactNative');
+    // Check if running on web (navigator exists and doesn't include ReactNative)
+    this.isWeb = typeof navigator !== 'undefined' && navigator?.userAgent?.includes('ReactNative') === false;
   }
 
   async init() {
-    try {
-      if (this.isWeb) {
-        return;
-      }
-      
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-    } catch (error) {
-      console.warn('Failed to init notification sound:', error);
-    }
+    // No init needed for expo-audio
   }
 
+  
   async playNotificationSound(soundType?: NotificationSoundType): Promise<void> {
     try {
       const settings = await settingsStorage.getSettings();
@@ -46,26 +33,24 @@ class NotificationSoundService {
         return;
       }
 
-      // For native platforms
-      let soundSource = SOUND_ASSETS.notification1;
+      // For native platforms - skip if using device default
       if (selectedSound === 'device') {
-        // Use system default
         return;
-      } else if (selectedSound === 'notification2') {
-        soundSource = SOUND_ASSETS.notification2;
       }
 
-      const { sound } = await Audio.Sound.createAsync(
-        soundSource as unknown as number,
-        { shouldPlay: true, volume: 0.8 }
-      );
-      this.sound = sound;
+      // Get sound source
+      const soundSource = selectedSound === 'notification2' 
+        ? SOUND_ASSETS.notification2 
+        : SOUND_ASSETS.notification1;
 
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
+      // Use expo-audio createAudioPlayer (not hook)
+      const player = createAudioPlayer(soundSource as AudioSource);
+      player.play();
+      
+      // Auto-cleanup after playing
+      setTimeout(() => {
+        player.remove();
+      }, 5000);
     } catch (error) {
       console.warn('Failed to play notification sound:', error);
     }
@@ -75,11 +60,11 @@ class NotificationSoundService {
     try {
       if (soundType === 'device') return;
       
-      const soundUri = soundType === 'default' 
-        ? SOUND_ASSETS.notification1 
-        : (SOUND_ASSETS[soundType as keyof typeof SOUND_ASSETS] || SOUND_ASSETS.notification1);
+      const soundSource = soundType === 'notification2' 
+        ? SOUND_ASSETS.notification2 
+        : SOUND_ASSETS.notification1;
       
-      const audio = new window.Audio(soundUri);
+      const audio = new window.Audio(soundSource);
       audio.volume = 0.5;
       audio.play().catch((err: Error) => {
         console.warn('Web audio play failed:', err);
@@ -90,10 +75,7 @@ class NotificationSoundService {
   }
 
   async unloadSound(): Promise<void> {
-    if (this.sound) {
-      await this.sound.unloadAsync();
-      this.sound = null;
-    }
+    // No-op for expo-audio
   }
 
   getAvailableSounds(): { id: NotificationSoundType; name: string }[] {
